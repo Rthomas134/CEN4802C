@@ -1,5 +1,6 @@
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -28,9 +29,11 @@ public class TaskStore {
      * add operation, not just storing whatever came in on the form.
      *
      * @param rawDescription the description typed into the form
+     * @param rawPriority    the priority selected on the form (e.g. "High");
+     *                       defaults to MEDIUM if missing or unrecognized
      * @return true if a task was added, false if the input was invalid
      */
-    public boolean addTask(String rawDescription) {
+    public boolean addTask(String rawDescription, String rawPriority) {
         if (rawDescription == null) {
             return false;
         }
@@ -38,7 +41,8 @@ public class TaskStore {
         if (description.isEmpty()) {
             return false;
         }
-        tasks.add(new Task(nextId.getAndIncrement(), description));
+        Task.Priority priority = Task.Priority.fromString(rawPriority);
+        tasks.add(new Task(nextId.getAndIncrement(), description, priority));
         return true;
     }
 
@@ -56,6 +60,19 @@ public class TaskStore {
     /** Returns all tasks in the order they were created. */
     public List<Task> getAllTasks() {
         return new ArrayList<>(tasks);
+    }
+
+    /**
+     * Returns all tasks sorted so higher-priority tasks (High, then
+     * Medium, then Low) come first; tasks with the same priority keep
+     * their original creation order. This is what the task list page
+     * actually renders, so higher-priority work is visible at a glance
+     * instead of being buried in creation order.
+     */
+    public List<Task> getAllTasksByPriority() {
+        List<Task> sorted = new ArrayList<>(tasks);
+        sorted.sort(Comparator.comparing(t -> t.getPriority().ordinal()));
+        return sorted;
     }
 
     public long countActive() {
