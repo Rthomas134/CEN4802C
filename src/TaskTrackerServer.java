@@ -52,7 +52,7 @@ public class TaskTrackerServer {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
-            String html = renderPage(store.getAllTasks(), store.countActive(), store.countCompleted());
+            String html = renderPage(store.getAllTasksByPriority(), store.countActive(), store.countCompleted());
             sendHtml(exchange, 200, html);
         }
     }
@@ -65,7 +65,7 @@ public class TaskTrackerServer {
                 return;
             }
             Map<String, String> form = parseFormBody(exchange);
-            store.addTask(form.get("description"));
+            store.addTask(form.get("description"), form.get("priority"));
             redirectHome(exchange);
         }
     }
@@ -108,19 +108,34 @@ public class TaskTrackerServer {
         html.append("li.done .desc{text-decoration:line-through;}");
         html.append(".complete-btn{background:#3f9142;padding:4px 10px;font-size:13px;}");
         html.append(".complete-btn:hover{background:#347a37;}");
+        html.append("select{padding:8px;font-size:15px;border:1px solid #c9ccd1;border-radius:4px;background:white;}");
+        html.append(".left{display:flex;align-items:center;gap:10px;}");
+        html.append(".badge{font-size:11px;font-weight:bold;text-transform:uppercase;padding:3px 8px;border-radius:10px;color:white;}");
+        html.append(".priority-high{background:#d64545;}");
+        html.append(".priority-medium{background:#d99a3a;}");
+        html.append(".priority-low{background:#4a90d9;}");
         html.append("</style></head><body>");
         html.append("<h1>Task Tracker</h1>");
         html.append("<p class='summary'>").append(active).append(" active, ").append(completed).append(" completed</p>");
 
         html.append("<form class='add-form' action='/add' method='post'>");
         html.append("<input type='text' name='description' placeholder='What do you need to do?' required>");
+        html.append("<select name='priority'>");
+        html.append("<option value='HIGH'>High</option>");
+        html.append("<option value='MEDIUM' selected>Medium</option>");
+        html.append("<option value='LOW'>Low</option>");
+        html.append("</select>");
         html.append("<button type='submit'>Add</button>");
         html.append("</form>");
 
         html.append("<ul>");
         for (Task t : tasks) {
             html.append("<li class='").append(t.isDone() ? "done" : "").append("'>");
+            html.append("<span class='left'>");
+            html.append("<span class='badge ").append(t.getPriority().cssClass()).append("'>")
+                .append(t.getPriority().label()).append("</span>");
             html.append("<span class='desc'>").append(escapeHtml(t.getDescription())).append("</span>");
+            html.append("</span>");
             if (!t.isDone()) {
                 html.append("<form action='/complete' method='post' style='margin:0;'>");
                 html.append("<input type='hidden' name='id' value='").append(t.getId()).append("'>");
