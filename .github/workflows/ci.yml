@@ -1,0 +1,55 @@
+name: CI
+
+# Runs on every push and pull request against main, and can also be triggered
+# manually from the Actions tab (useful for the "successful CI run" screenshots).
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Obtain the project's source code from the repository.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up the JDK that matches the project's build config
+      #    (pom.xml compiles with <release>17</release>).
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # 3. Run the project's EXISTING build lifecycle. `mvn clean package`
+      #    reuses pom.xml as-is: Maven's lifecycle runs compile -> test
+      #    (surefire) -> package (jar) in that order, so this single command
+      #    is the same build+test+package process used locally in
+      #    Assignments 2 and 3 -- nothing CI-specific is duplicated here.
+      - name: Build, test, and package with Maven
+        run: mvn --batch-mode --no-transfer-progress clean package
+
+      # 4. Surface the JUnit XML results as a native GitHub Actions check,
+      #    so pass/fail counts show up without opening raw logs.
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Maven Tests
+          path: target/surefire-reports/*.xml
+          reporter: java-junit
+
+      # 5. Upload the packaged JAR as a downloadable build artifact so the
+      #    generated deliverable is directly attached to this run.
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-tracker-jar
+          path: target/*.jar
+          if-no-files-found: error
