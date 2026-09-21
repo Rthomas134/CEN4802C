@@ -149,6 +149,7 @@ public class TaskTrackerServer {
         }
         html.append("</ul>");
 
+        html.append("<p style='margin-top:24px;color:#999;font-size:12px;'>Task Tracker v1.0</p>");
         html.append("</body></html>");
         return html.toString();
     }
