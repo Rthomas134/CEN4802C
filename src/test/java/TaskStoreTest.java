@@ -101,6 +101,40 @@ class TaskStoreTest {
         assertFalse(result, "completing a nonexistent id should fail rather than throw or silently succeed");
         assertFalse(store.getAllTasks().get(0).isDone(), "the existing task must be untouched");
     }
+    // ---- deleteTask -----------------------------------------------------
+
+    @Test
+    void deleteTask_withExistingId_removesTaskAndReturnsTrue() {
+        store.addTask("Finish report", "HIGH");
+        int id = store.getAllTasks().get(0).getId();
+
+        boolean removed = store.deleteTask(id);
+
+        assertTrue(removed, "deleting an existing task should return true");
+        assertTrue(store.getAllTasks().isEmpty(), "the deleted task should no longer be in the store");
+    }
+
+    @Test
+    void deleteTask_withUnknownId_returnsFalseAndChangesNothing() {
+        store.addTask("Finish report", "HIGH");
+
+        boolean removed = store.deleteTask(9999);
+
+        assertFalse(removed, "deleting a nonexistent id should fail rather than throw or silently succeed");
+        assertEquals(1, store.getAllTasks().size(), "the existing task must be untouched");
+    }
+
+    @Test
+    void deleteTask_doesNotAffectOtherTasks() {
+        store.addTask("Task A", "HIGH");
+        store.addTask("Task B", "MEDIUM");
+        int idToDelete = store.getAllTasks().get(0).getId();
+
+        store.deleteTask(idToDelete);
+
+        assertEquals(1, store.getAllTasks().size());
+        assertEquals("Task B", store.getAllTasks().get(0).getDescription());
+    }
 
     // ---- counts -------------------------------------------------------------
 
