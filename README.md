@@ -1,6 +1,6 @@
 # cen4802 &mdash; Task Tracker
 
-**Author:** Rawkk
+**Author:** Raquel Thomas
 
 ## What this is
 
@@ -115,3 +115,20 @@ Because Maven's build lifecycle runs `test` before `package`, running
 `mvn clean package` (see "Building it" above) automatically runs the full
 test suite first and **fails the build** if any test fails, without a jar
 ever being produced from code that didn't pass its tests.
+
+
+## Running with Docker
+
+Build the application first (produces `target/task-tracker-1.0.jar`):
+
+    mvn clean package
+
+Build the Docker image:
+
+    docker build -t task-tracker .
+
+Run the container:
+
+    docker run -d -p 8080:8080 --name task-tracker task-tracker
+
+Then open http://localhost:8080 in your browser.
