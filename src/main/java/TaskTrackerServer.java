@@ -15,13 +15,14 @@ import java.util.Map;
  * TaskTrackerServer.java
  *
  * Wires up a tiny HTTP server (using only classes built into the JDK --
- * no external web framework) with three routes:
+ * no external web framework) with four routes:
  *
  *   GET  /         renders the task list page
  *   POST /add      reads a "description" form field and adds a task
  *   POST /complete reads an "id" form field and marks that task done
+ *   POST /delete   reads an "id" form field and removes that task
  *
- * Both POST handlers redirect back to "/" when finished, so the browser
+ * All POST handlers redirect back to "/" when finished, so the browser
  * always ends up looking at the current state of the list (this also
  * means refreshing the page after a submit doesn't resubmit the form).
  */
@@ -38,6 +39,7 @@ public class TaskTrackerServer {
         server.createContext("/", new RootHandler());
         server.createContext("/add", new AddHandler());
         server.createContext("/complete", new CompleteHandler());
+        server.createContext("/delete", new DeleteHandler());
         server.setExecutor(null); // default single-threaded executor is fine for this app
         server.start();
         return server;
@@ -88,6 +90,24 @@ public class TaskTrackerServer {
         }
     }
 
+    private class DeleteHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+            Map<String, String> form = parseFormBody(exchange);
+            try {
+                int id = Integer.parseInt(form.get("id"));
+                store.deleteTask(id);
+            } catch (NumberFormatException ignored) {
+                // Malformed id: just fall through and redirect home with no change.
+            }
+            redirectHome(exchange);
+        }
+    }
+
     // ---- HTML rendering ----------------------------------------------
 
     private String renderPage(List<Task> tasks, long active, long completed) {
@@ -108,6 +128,8 @@ public class TaskTrackerServer {
         html.append("li.done .desc{text-decoration:line-through;}");
         html.append(".complete-btn{background:#3f9142;padding:4px 10px;font-size:13px;}");
         html.append(".complete-btn:hover{background:#347a37;}");
+        html.append(".delete-btn{background:#b03a2e;padding:4px 10px;font-size:13px;}");
+        html.append(".delete-btn:hover{background:#8e2e24;}");
         html.append("select{padding:8px;font-size:15px;border:1px solid #c9ccd1;border-radius:4px;background:white;}");
         html.append(".left{display:flex;align-items:center;gap:10px;}");
         html.append(".badge{font-size:11px;font-weight:bold;text-transform:uppercase;padding:3px 8px;border-radius:10px;color:white;}");
@@ -133,15 +155,21 @@ public class TaskTrackerServer {
             html.append("<li class='").append(t.isDone() ? "done" : "").append("'>");
             html.append("<span class='left'>");
             html.append("<span class='badge ").append(t.getPriority().cssClass()).append("'>")
-                .append(t.getPriority().label()).append("</span>");
+                    .append(t.getPriority().label()).append("</span>");
             html.append("<span class='desc'>").append(escapeHtml(t.getDescription())).append("</span>");
             html.append("</span>");
+            html.append("<span style='display:flex;gap:6px;'>");
             if (!t.isDone()) {
                 html.append("<form action='/complete' method='post' style='margin:0;'>");
                 html.append("<input type='hidden' name='id' value='").append(t.getId()).append("'>");
                 html.append("<button class='complete-btn' type='submit'>Complete</button>");
                 html.append("</form>");
             }
+            html.append("<form action='/delete' method='post' style='margin:0;'>");
+            html.append("<input type='hidden' name='id' value='").append(t.getId()).append("'>");
+            html.append("<button class='delete-btn' type='submit'>Delete</button>");
+            html.append("</form>");
+            html.append("</span>");
             html.append("</li>");
         }
         if (tasks.isEmpty()) {
