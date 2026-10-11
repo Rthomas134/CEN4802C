@@ -59,7 +59,7 @@ public class TaskStore {
 
     /** Removes the task with the given id, if it exists. */
     public boolean deleteTask(int id) {
-        return tasks.removeIf(t -> t.getId() != id);
+        return tasks.removeIf(t -> t.getId() == id);
     }
 
     /** Returns all tasks in the order they were created. */
