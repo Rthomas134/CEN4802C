@@ -3,6 +3,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Logger;
 
 /**
  * TaskStore.java
@@ -20,6 +21,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class TaskStore {
 
+    private static final Logger LOG = Logger.getLogger(AppLogging.ROOT + ".store");
+
+    /** Longest description accepted; longer input is truncated (and logged). */
+    static final int MAX_DESCRIPTION_LENGTH = 200;
+
     private final List<Task> tasks = Collections.synchronizedList(new ArrayList<>());
     private final AtomicInteger nextId = new AtomicInteger(1);
 
@@ -35,14 +41,27 @@ public class TaskStore {
      */
     public boolean addTask(String rawDescription, String rawPriority) {
         if (rawDescription == null) {
+            LOG.warning("Add rejected: description field was missing from the request");
             return false;
         }
         String description = rawDescription.trim();
         if (description.isEmpty()) {
+            LOG.warning("Add rejected: blank description (raw length=" + rawDescription.length() + ")");
             return false;
         }
+        if (description.length() > MAX_DESCRIPTION_LENGTH) {
+            LOG.warning("Description truncated from " + description.length() + " to "
+                    + MAX_DESCRIPTION_LENGTH + " characters");
+            description = description.substring(0, MAX_DESCRIPTION_LENGTH);
+        }
         Task.Priority priority = Task.Priority.fromString(rawPriority);
-        tasks.add(new Task(nextId.getAndIncrement(), description, priority));
+        if (!priority.name().equalsIgnoreCase(rawPriority == null ? "" : rawPriority.trim())) {
+            LOG.warning("Unrecognized priority '" + rawPriority + "', defaulted to " + priority);
+        }
+        Task task = new Task(nextId.getAndIncrement(), description, priority);
+        tasks.add(task);
+        LOG.info("Task added: id=" + task.getId() + " priority=" + priority
+                + " description=\"" + description + "\" (" + countActive() + " active)");
         return true;
     }
 
@@ -50,16 +69,30 @@ public class TaskStore {
     public boolean completeTask(int id) {
         for (Task t : tasks) {
             if (t.getId() == id) {
+                if (t.isDone()) {
+                    LOG.fine("Complete ignored: task id=" + id + " was already done");
+                    return true;
+                }
                 t.markDone();
+                LOG.info("Task completed: id=" + id + " priority=" + t.getPriority()
+                        + " description=\"" + t.getDescription() + "\" (" + countActive() + " active, "
+                        + countCompleted() + " completed)");
                 return true;
             }
         }
+        LOG.warning("Complete failed: no task with id=" + id + " (" + tasks.size() + " tasks in store)");
         return false;
     }
 
     /** Removes the task with the given id, if it exists. */
     public boolean deleteTask(int id) {
-        return tasks.removeIf(t -> t.getId() == id);
+        boolean removed = tasks.removeIf(t -> t.getId() == id);
+        if (removed) {
+            LOG.info("Task deleted: id=" + id + " (" + tasks.size() + " tasks remain)");
+        } else {
+            LOG.warning("Delete failed: no task with id=" + id + " (" + tasks.size() + " tasks in store)");
+        }
+        return removed;
     }
 
     /** Returns all tasks in the order they were created. */

@@ -6,6 +6,12 @@ WORKDIR /app
 # directory into the image.
 COPY target/task-tracker-1.0.jar app.jar
 
+# Logging: java.util.logging writes to the console (captured by
+# `docker logs`) and to /app/logs/task-tracker.0.log inside the container.
+# Change how much is recorded at run time without rebuilding, e.g.:
+#   docker run -e LOG_LEVEL=FINE ...
+ENV LOG_LEVEL=INFO
+
 # The Task Tracker web server listens on 8080.
 EXPOSE 8080
 
