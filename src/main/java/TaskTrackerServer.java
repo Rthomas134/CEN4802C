@@ -10,6 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * TaskTrackerServer.java
@@ -25,10 +28,19 @@ import java.util.Map;
  * All POST handlers redirect back to "/" when finished, so the browser
  * always ends up looking at the current state of the list (this also
  * means refreshing the page after a submit doesn't resubmit the form).
+ *
+ * Every handler is wrapped in a LoggedHandler, which gives each request
+ * an id (req-1, req-2, ...), times it, logs the outcome at a level that
+ * matches the HTTP status, and turns any unexpected exception into a
+ * logged SEVERE entry plus an HTTP 500 instead of a silently dropped
+ * connection.
  */
 public class TaskTrackerServer {
 
+    private static final Logger LOG = Logger.getLogger(AppLogging.ROOT + ".http");
+
     private final TaskStore store;
+    private final AtomicLong requestCounter = new AtomicLong();
 
     public TaskTrackerServer(TaskStore store) {
         this.store = store;
@@ -36,13 +48,72 @@ public class TaskTrackerServer {
 
     public HttpServer start(int port) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/", new RootHandler());
-        server.createContext("/add", new AddHandler());
-        server.createContext("/complete", new CompleteHandler());
-        server.createContext("/delete", new DeleteHandler());
+        server.createContext("/", new LoggedHandler(new RootHandler()));
+        server.createContext("/add", new LoggedHandler(new AddHandler()));
+        server.createContext("/complete", new LoggedHandler(new CompleteHandler()));
+        server.createContext("/delete", new LoggedHandler(new DeleteHandler()));
         server.setExecutor(null); // default single-threaded executor is fine for this app
         server.start();
+        LOG.config("HTTP server listening on port " + port + " with routes /, /add, /complete, /delete");
         return server;
+    }
+
+    // ---- Request logging ----------------------------------------------
+
+    /**
+     * Wraps a route handler with request logging and error handling.
+     *   2xx/3xx -> INFO     (normal traffic)
+     *   4xx     -> WARNING  (client sent something we could not honor)
+     *   5xx / exception -> SEVERE with the full stack trace
+     */
+    private class LoggedHandler implements HttpHandler {
+        private final HttpHandler delegate;
+
+        LoggedHandler(HttpHandler delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String reqId = "req-" + requestCounter.incrementAndGet();
+            String method = exchange.getRequestMethod();
+            String path = exchange.getRequestURI().getPath();
+            String client = exchange.getRemoteAddress() == null
+                    ? "unknown" : exchange.getRemoteAddress().getAddress().getHostAddress();
+            long start = System.nanoTime();
+            LOG.fine(reqId + " -> " + method + " " + path + " from " + client
+                    + " user-agent=\"" + exchange.getRequestHeaders().getFirst("User-Agent") + "\"");
+            try {
+                delegate.handle(exchange);
+            } catch (Exception e) {
+                LOG.log(Level.SEVERE, reqId + " " + method + " " + path + " from " + client
+                        + " failed with " + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
+                sendError(exchange, reqId);
+            } finally {
+                long ms = (System.nanoTime() - start) / 1_000_000;
+                int status = exchange.getResponseCode();
+                String line = reqId + " " + method + " " + path + " -> " + status + " in " + ms + " ms from " + client;
+                if (status >= 500) {
+                    LOG.severe(line);
+                } else if (status >= 400) {
+                    LOG.warning(line);
+                } else {
+                    LOG.info(line);
+                }
+                exchange.close();
+            }
+        }
+
+        private void sendError(HttpExchange exchange, String reqId) {
+            try {
+                if (exchange.getResponseCode() == -1) { // headers not sent yet
+                    sendHtml(exchange, 500, "<h1>500 - Something went wrong</h1><p>Reference: "
+                            + reqId + " (see the server log)</p><p><a href='/'>Back to Task Tracker</a></p>");
+                }
+            } catch (IOException ioe) {
+                LOG.log(Level.WARNING, reqId + " could not send 500 response to client", ioe);
+            }
+        }
     }
 
     // ---- Handlers ---------------------------------------------------
@@ -54,7 +125,13 @@ public class TaskTrackerServer {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
-            String html = renderPage(store.getAllTasksByPriority(), store.countActive(), store.countCompleted());
+            if (!"/".equals(exchange.getRequestURI().getPath())) {
+                sendHtml(exchange, 404, "<h1>404 - Not found</h1><p><a href='/'>Back to Task Tracker</a></p>");
+                return;
+            }
+            List<Task> tasks = store.getAllTasksByPriority();
+            String html = renderPage(tasks, store.countActive(), store.countCompleted());
+            LOG.fine("Rendered task list: " + tasks.size() + " tasks, " + html.length() + " bytes");
             sendHtml(exchange, 200, html);
         }
     }
@@ -67,6 +144,8 @@ public class TaskTrackerServer {
                 return;
             }
             Map<String, String> form = parseFormBody(exchange);
+            LOG.fine("Add form fields: description=\"" + form.get("description")
+                    + "\" priority=" + form.get("priority"));
             store.addTask(form.get("description"), form.get("priority"));
             redirectHome(exchange);
         }
@@ -83,8 +162,9 @@ public class TaskTrackerServer {
             try {
                 int id = Integer.parseInt(form.get("id"));
                 store.completeTask(id);
-            } catch (NumberFormatException ignored) {
-                // Malformed id: just fall through and redirect home with no change.
+            } catch (NumberFormatException e) {
+                // Malformed id: nothing to complete, redirect home with no change.
+                LOG.warning("Complete ignored: malformed id '" + form.get("id") + "' (" + e.getMessage() + ")");
             }
             redirectHome(exchange);
         }
@@ -101,8 +181,9 @@ public class TaskTrackerServer {
             try {
                 int id = Integer.parseInt(form.get("id"));
                 store.deleteTask(id);
-            } catch (NumberFormatException ignored) {
-                // Malformed id: just fall through and redirect home with no change.
+            } catch (NumberFormatException e) {
+                // Malformed id: nothing to delete, redirect home with no change.
+                LOG.warning("Delete ignored: malformed id '" + form.get("id") + "' (" + e.getMessage() + ")");
             }
             redirectHome(exchange);
         }
@@ -177,7 +258,7 @@ public class TaskTrackerServer {
         }
         html.append("</ul>");
 
-        html.append("<p style='margin-top:24px;color:#999;font-size:12px;'>Task Tracker v1.1 (containerized)</p>");
+        html.append("<p style='margin-top:24px;color:#999;font-size:12px;'>Task Tracker v1.2 (logging)</p>");
         html.append("</body></html>");
         return html.toString();
     }
@@ -196,7 +277,6 @@ public class TaskTrackerServer {
     private void redirectHome(HttpExchange exchange) throws IOException {
         exchange.getResponseHeaders().set("Location", "/");
         exchange.sendResponseHeaders(303, -1);
-        exchange.close();
     }
 
     private Map<String, String> parseFormBody(HttpExchange exchange) throws IOException {

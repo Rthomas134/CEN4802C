@@ -14,5 +14,7 @@ target/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs (generated at run time)
+logs/
 *.log
+*.log.lck
