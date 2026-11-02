@@ -19,6 +19,29 @@ spec:
           image: ghcr.io/rthomas134/task-tracker:latest
           ports:
             - containerPort: 8080
+          # Resource requests/limits give `kubectl top` and the scheduler a
+          # reference point (e.g. 120Mi used of a 256Mi limit).
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "256Mi"
+          # Kubernetes polls /health: a pod only receives traffic when ready
+          # and is restarted if it stops responding.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
           env:
             # Minimum log level for the app (SEVERE, WARNING, INFO, FINE).
             # Change it here and `kubectl apply -f deployment.yaml` to roll out

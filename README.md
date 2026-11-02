@@ -219,3 +219,56 @@ kubectl logs -l app=task-tracker --prefix | grep SEVERE
 Unit tests for logging behaviour: `TaskStoreLoggingTest` (captures the log
 records `TaskStore` produces and checks their levels and content) and
 `AppLoggingTest` (the `LOG_LEVEL` parsing).
+
+
+## Systems monitoring
+
+The app runs in Docker and is monitored from two angles:
+
+| View | Tool | What it shows |
+|---|---|---|
+| Outside (container) | `docker stats`, `docker ps`, `docker top`, Docker Desktop | CPU %, memory used / limit (MiB), PIDs, network I/O, health status |
+| Inside (application) | `GET /health` (JSON) | Task counts, requests served, 4xx/5xx counts, average / max request time (ms), JVM heap used / committed / max (MiB), threads, GC count and time |
+
+`AppMetrics.java` builds the `/health` response using `java.lang.management`
+(built into the JDK, no new dependencies). `/health` calls are not counted
+in the request statistics and are logged at FINE, so polling does not skew
+the numbers or flood the INFO log.
+
+The `Dockerfile` has a `HEALTHCHECK` that calls `/health` every 15 s, so
+`docker ps` shows the container as `healthy` or `unhealthy`.
+`deployment.yaml` uses the same endpoint for Kubernetes readiness and
+liveness probes and sets CPU/memory requests and limits.
+
+### Running the monitored container
+
+```bash
+mvn clean package
+docker build -t task-tracker:monitoring .
+docker run -d --name task-tracker -p 8080:8080 --memory 256m --cpus 1 task-tracker:monitoring
+docker ps                     # STATUS shows (healthy) after ~15 s
+curl http://localhost:8080/health
+```
+
+`--memory 256m --cpus 1` give the container fixed limits, so `MEM %` and
+`CPU %` in `docker stats` are measured against a known size.
+
+### Collecting measurements
+
+`scripts/monitor.sh <label> [seconds] [interval]` samples `docker stats` and
+`/health` together, prints a row per sample, writes
+`monitoring-data/<label>.csv` (git-ignored), and prints average/peak values.
+`scripts/load-test.sh [workers] [seconds]` runs concurrent simulated users
+(page loads, adds, completes) for a fixed time.
+
+```bash
+./scripts/monitor.sh baseline 60 5           # idle app
+./scripts/monitor.sh workload 75 5           # window 1 ...
+./scripts/load-test.sh 8 60                  # ... while this runs in window 2
+./scripts/monitor.sh after 60 5              # after the load stops
+```
+
+Other useful commands: `docker stats task-tracker` (live view),
+`docker top task-tracker` (process inside the container),
+`docker inspect --format '{{json .State.Health}}' task-tracker` (health-check history),
+`docker logs task-tracker --tail 20`.
