@@ -24,6 +24,7 @@ import java.util.logging.Logger;
  *   POST /add      reads a "description" form field and adds a task
  *   POST /complete reads an "id" form field and marks that task done
  *   POST /delete   reads an "id" form field and removes that task
+ *   GET  /health   JSON operational status for monitoring
  *
  * All POST handlers redirect back to "/" when finished, so the browser
  * always ends up looking at the current state of the list (this also
@@ -41,6 +42,7 @@ public class TaskTrackerServer {
 
     private final TaskStore store;
     private final AtomicLong requestCounter = new AtomicLong();
+    private final AppMetrics metrics = new AppMetrics();
 
     public TaskTrackerServer(TaskStore store) {
         this.store = store;
@@ -52,9 +54,10 @@ public class TaskTrackerServer {
         server.createContext("/add", new LoggedHandler(new AddHandler()));
         server.createContext("/complete", new LoggedHandler(new CompleteHandler()));
         server.createContext("/delete", new LoggedHandler(new DeleteHandler()));
+        server.createContext("/health", new LoggedHandler(new HealthHandler()));
         server.setExecutor(null); // default single-threaded executor is fine for this app
         server.start();
-        LOG.config("HTTP server listening on port " + port + " with routes /, /add, /complete, /delete");
+        LOG.config("HTTP server listening on port " + port + " with routes /, /add, /complete, /delete, /health");
         return server;
     }
 
@@ -92,8 +95,14 @@ public class TaskTrackerServer {
             } finally {
                 long ms = (System.nanoTime() - start) / 1_000_000;
                 int status = exchange.getResponseCode();
+                boolean healthCheck = "/health".equals(path);
+                if (!healthCheck) {
+                    metrics.recordRequest(status, System.nanoTime() - start);
+                }
                 String line = reqId + " " + method + " " + path + " -> " + status + " in " + ms + " ms from " + client;
-                if (status >= 500) {
+                if (healthCheck && status == 200) {
+                    LOG.fine(line);   // monitoring polls this often; keep it out of INFO
+                } else if (status >= 500) {
                     LOG.severe(line);
                 } else if (status >= 400) {
                     LOG.warning(line);
@@ -133,6 +142,28 @@ public class TaskTrackerServer {
             String html = renderPage(tasks, store.countActive(), store.countCompleted());
             LOG.fine("Rendered task list: " + tasks.size() + " tasks, " + html.length() + " bytes");
             sendHtml(exchange, 200, html);
+        }
+    }
+
+    /**
+     * GET /health -- operational status for monitoring: task counts,
+     * request counts and timings, and JVM heap/threads/GC/CPU (see
+     * AppMetrics). Polled by scripts/monitor.sh and Docker's HEALTHCHECK.
+     */
+    private class HealthHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+            byte[] bytes = metrics.toJson(store).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
         }
     }
 
@@ -258,7 +289,7 @@ public class TaskTrackerServer {
         }
         html.append("</ul>");
 
-        html.append("<p style='margin-top:24px;color:#999;font-size:12px;'>Task Tracker v1.2 (logging)</p>");
+        html.append("<p style='margin-top:24px;color:#999;font-size:12px;'>Task Tracker v1.3 (monitoring)</p>");
         html.append("</body></html>");
         return html.toString();
     }
