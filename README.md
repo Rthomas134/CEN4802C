@@ -272,3 +272,37 @@ Other useful commands: `docker stats task-tracker` (live view),
 `docker top task-tracker` (process inside the container),
 `docker inspect --format '{{json .State.Health}}' task-tracker` (health-check history),
 `docker logs task-tracker --tail 20`.
+
+
+## Software profiling
+
+The app is profiled with **VisualVM** (free, from https://visualvm.github.io/),
+which attaches to the running JVM and samples what every thread is executing
+and what it allocates. No code changes or agents are required.
+
+1. Build and start the app locally (not in Docker, so VisualVM can attach to
+   it as a local process):
+   ```bash
+   mvn clean package
+   java -jar target/task-tracker-1.0.jar
+   ```
+2. Start VisualVM (`bin\visualvm.exe` in the extracted zip). Under
+   **Applications → Local**, open the process whose main class is
+   `target/task-tracker-1.0.jar`.
+3. **Sampler → CPU** (or **Memory**) → start sampling, then run the workload
+   from another terminal:
+   ```bash
+   ./scripts/load-test.sh 8 90
+   ```
+4. Take a **Snapshot** to keep the results, and use the call tree to drill
+   into the hot methods. **Monitor** shows heap and GC activity, **Threads**
+   shows thread states.
+
+For a lower-overhead recording, the JDK's built-in Java Flight Recorder can be
+used instead; the `.jfr` file opens in VisualVM or JDK Mission Control:
+
+```bash
+java -XX:StartFlightRecording:filename=profiling/recording.jfr,settings=profile,dumponexit=true -jar target/task-tracker-1.0.jar
+```
+
+`profiling/`, `*.jfr` and `*.nps` (VisualVM snapshots) are git-ignored.

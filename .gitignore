@@ -14,6 +14,11 @@ target/
 .DS_Store
 Thumbs.db
 
+# Profiling recordings and snapshots (can be large)
+profiling/
+*.jfr
+*.nps
+
 # Monitoring samples written by scripts/monitor.sh
 monitoring-data/
 
