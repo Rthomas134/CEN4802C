@@ -1,0 +1,5 @@
+# The image only needs the packaged jar (see Dockerfile). Excluding
+# everything else keeps the build context small -- especially infra/.terraform,
+# which holds the downloaded Terraform provider.
+*
+!target/task-tracker-1.0.jar

@@ -306,3 +306,45 @@ java -XX:StartFlightRecording:filename=profiling/recording.jfr,settings=profile,
 ```
 
 `profiling/`, `*.jfr` and `*.nps` (VisualVM snapshots) are git-ignored.
+
+
+## Infrastructure as Code (Terraform)
+
+`infra/` defines the local runtime environment for the app with
+**Terraform** and the `kreuzwerker/docker` provider. Terraform builds the
+image and creates, changes and removes everything below; nothing is created
+with manual `docker` commands.
+
+| Resource | Purpose |
+|---|---|
+| `docker_network.app` | Private bridge network `task-tracker-dev-net` |
+| `docker_volume.logs[N]` | One log volume per container, mounted at `/app/logs` |
+| `docker_image.app` | Image `task-tracker-dev:latest`, built from the `Dockerfile`; rebuilt when the jar changes |
+| `docker_container.app[N]` | `replicas` containers on ports `base_port`, `base_port+1`, ...; memory limit, `LOG_LEVEL`, restart policy; Terraform waits for the `/health` HEALTHCHECK |
+
+The desired state lives in `infra/terraform.tfvars` (`replicas`,
+`base_port`, `memory_mb`, `log_level`). Inputs are validated (for example
+`replicas` 1-5, `log_level` one of the JUL levels).
+
+### Workflow
+
+Requires Terraform 1.5+ and Docker Desktop running.
+
+```bash
+mvn clean package            # the image is built from target/task-tracker-1.0.jar
+cd infra
+terraform init               # downloads the Docker provider
+terraform fmt -check
+terraform validate
+terraform plan -out=dev.tfplan
+terraform apply dev.tfplan
+terraform output             # app and /health URLs
+terraform state list
+# change terraform.tfvars, then plan + apply again
+terraform destroy
+```
+
+On macOS/Linux set `docker_host = "unix:///var/run/docker.sock"` in
+`terraform.tfvars`. State (`*.tfstate`) and `.terraform/` are git-ignored;
+`.terraform.lock.hcl` is committed. `.dockerignore` keeps the build context
+to just the jar.

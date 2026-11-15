@@ -14,6 +14,14 @@ target/
 .DS_Store
 Thumbs.db
 
+# Terraform: provider downloads and state (state can contain sensitive data;
+# .terraform.lock.hcl IS committed so everyone uses the same provider version)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
 # Profiling recordings and snapshots (can be large)
 profiling/
 *.jfr
